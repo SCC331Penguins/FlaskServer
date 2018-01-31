@@ -3,6 +3,8 @@ import sqlite3
 import config
 from passlib.apps import custom_app_context as pwd_context
 from itsdangerous import (TimedJSONWebSignatureSerializer as Serializer, BadSignature, SignatureExpired)
+from Authentication import authenticator
+from flask import jsonify
 
 class DbHandler:
 
@@ -10,37 +12,29 @@ class DbHandler:
         self.connection = sqlite3.connect(config.DATABASE_NAME)
         self.cursor = self.connection.cursor()
 
+    def verify_router(self, router_id, token):
+        secret_key = self.fetch_result(self.execute_query("SELECT router_secret_key FROM Routers WHERE router_id = " + str(router_id) + ";"))[0][0]
+        return authenticator.verify_token(token, secret_key=secret_key)
+
     def create_user(self, username, password):
         password_hash = pwd_context.encrypt(password)
         createUserQuery = "INSERT INTO Users (username, password) VALUES('" + username + "', '" + password_hash + "')"
         if len(self.retreive_user(username)) >= 1:
-            return "Username already exists"
+            return {'result':False, 'message':"Username already exists"}
         self.execute_query(createUserQuery)
-        return "User created succesfully."
+        return {'result': True, 'message': "Username created"}
 
     def retreive_user(self, username):
-        retreiveUserQuery = "SELECT * FROM Users WHERE username = '" + username + "';"
-        user = self.fetch_result(self.execute_query(retreiveUserQuery))
-        return user
-
-    def retreive_router(self, router_id):
-        retreiveRouterQuery = "SELECT router_id FROM Routers WHERE router_id = " + str(router_id) + ";"
-        return self.fetch_result(self.execute_query(retreiveRouterQuery))
+        return self.fetch_result(self.execute_query("SELECT * FROM Users WHERE username = '" + username + "';"))
 
     def login_user(self, username, password):
         result = self.retreive_user(username)
         if len(result) == 0:
             return [(False, "Username does not exist")]
         if pwd_context.verify(password, result[0][2]) == True:
-            token = self.generate_token(result[0][0], result[0][1])
-            print (token)
-            return [(True, token.decode('ascii'))]
+            return [(True, authenticator.generate_token(result[0][0]))]
         self.record_error(config.ERROR_LOGIN_ATTEMPT, "Attempt login on user: " + str(username))
         return [(False, "Incorrect password")]
-
-    def generate_token(self, id, username, expiration = config.TOKEN_EXPIRE):
-        s = Serializer(config.SECRET_KEY, expires_in=expiration)
-        return s.dumps({'username': username, 'id': id})
 
     def register_router(self, user_id, router_id):
         router = self.retreive_router(router_id)
